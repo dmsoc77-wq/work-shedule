@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>График работы смен</title>
+  <style>
+    :root {
+      --bg:#0b1220;
+      --panel:#121a2a;
+      --panel-2:#0e1627;
+      --text:#e9eefc;
+      --muted:#9fb0d0;
+      --primary:#4f8cff;
+      --ok:#6bd28d;
+      --warn:#ffd166;
+      --danger:#ff6b6b;
+      --border:#1b2842;
+
+      --shift-day:#ffeaa7;
+      --shift-night:#ffccd5;
+      --shift-off:#cbd5e1;
+      --shift-vac:#b3e5fc;
+      --shift-sick:#fca5a5;
+    }
+    * { box-sizing:border-box; }
+    body { margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,Segoe UI,Roboto,Ubuntu,Arial; }
+    h1 { font-size:20px;margin:0 0 8px; }
+    .app { max-width:1400px;margin:24px auto;padding:0 16px; }
+    .toolbar { display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:var(--panel);border:1px solid var(--border);padding:12px;border-radius:14px; }
+    select,input,button { background:var(--panel-2);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:10px; }
+    button.primary { background:var(--primary);border:none;cursor:pointer; }
+    button.ghost { background:transparent;cursor:pointer; }
+
+    .grid-wrap { margin-top:14px;background:var(--panel);border:1px solid var(--border);border-radius:14px;overflow:auto; }
+    table { border-collapse:separate;border-spacing:0;width:100%;min-width:1100px; }
+    thead th { position:sticky;top:0;background:var(--panel); }
+    th,td { border-bottom:1px solid var(--border);border-right:1px solid var(--border);padding:6px 8px;text-align:center; }
+    th:first-child,td:first-child { position:sticky;left:0;background:var(--panel); }
+    th:nth-child(2),td:nth-child(2) { position:sticky;left:60px;background:var(--panel); }
+    th:nth-child(3),td:nth-child(3) { position:sticky;left:280px;background:var(--panel); }
+    thead th:first-child { z-index:3; }
+    .col-num{width:60px}
+    .col-name{width:220px;text-align:left}
+    .col-ack{width:220px}
+    .weekday{font-size:11px;color:var(--muted)}
+    .weekend{background:rgba(255,255,255,.04)}
+
+    .cell{min-width:46px;height:38px;cursor:pointer}
+    .cell[data-shift="D"]{background:var(--shift-day);color:#111}
+    .cell[data-shift="N"]{background:var(--shift-night);color:#111}
+    .cell[data-shift="O"]{background:var(--shift-off);color:#111}
+    .cell[data-shift="V"]{background:var(--shift-vac);color:#111}
+    .cell[data-shift="B"]{background:var(--shift-sick);color:#111}
+    .totals{font-weight:600;background:rgba(255,255,255,.03)}
+    tfoot td{position:sticky;bottom:0;background:var(--panel);font-weight:600}
+    .legend{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;color:var(--muted)}
+    .legend .tag{border:1px solid var(--border);padding:6px 8px;border-radius:10px;background:var(--panel)}
+    .note{margin-top:10px;color:var(--muted)}
+  </style>
+</head>
+<body>
+<div class="app">
+  <h1>График работы смен</h1>
+
+  <div class="toolbar">
+    <label for="month">Месяц</label>
+    <select id="month"></select>
+    <label for="year">Год</label>
+    <input id="year" type="number" style="width:100px"/>
+    <button id="prev" class="ghost">◀</button>
+    <button id="next" class="ghost">▶</button>
+    <button id="addRow">+ Сотрудник</button>
+    <button id="exportCsv" class="primary">Экспорт CSV</button>
+  </div>
+
+  <div class="legend">
+    <span class="tag"><b>D</b> — День</span>
+    <span class="tag"><b>N</b> — Ночь</span>
+    <span class="tag"><b>O</b> — Выходной</span>
+    <span class="tag"><b>V</b> — Отпуск</span>
+    <span class="tag"><b>B</b> — Больничный</span>
+  </div>
+
+  <div class="grid-wrap">
+    <table id="grid"></table>
+  </div>
+
+  <div class="note">Данные сохраняются в <b>LocalStorage</b>. Экспорт CSV работает в Excel.</div>
+</div>
+
+<script>
+(function(){
+  const monthNames=['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+  const shifts={D:{hours:11,night:false},N:{hours:11,night:true},O:{hours:0},V:{hours:0},B:{hours:0}};
+  const state={year:new Date().getFullYear(),month:new Date().getMonth(),employees:[{name:'ФИО1'},{name:'ФИО2'}],schedule:{}};
+  const key=(r,d)=>`${r}:${d}`;
+  const daysInMonth=(y,m)=> new Date(y,m+1,0).getDate();
+  const weekday=(y,m,d)=> new Date(y,m,d).getDay();
+  const $grid=document.getElementById('grid');
+  const $month=document.getElementById('month');
+  const $year=document.getElementById('year');
+  $month.innerHTML=monthNames.map((m,i)=>`<option value="${i}">${m}</option>`).join('');
+  $month.value=state.month; $year.value=state.year;
+
+  function render(){
+    const days=daysInMonth(state.year,state.month);
+    let thead=`<thead><tr><th>№</th><th>ФИО</th><th>Ознакомлен</th>`;
+    for(let d=1;d<=days;d++){const wd=weekday(state.year,state.month,d);const wkd=(wd===0||wd===6)?'weekend':'';thead+=`<th class="${wkd}">${d}</th>`;}
+    thead+=`<th>Часы</th><th>Дни</th><th>Ночные</th></tr></thead>`;
+    let tbody='<tbody>';
+    state.employees.forEach((emp,r)=>{
+      let row=`<tr><td>${r+1}</td><td contenteditable>${emp.name}</td><td contenteditable></td>`;
+      let h=0,dw=0,n=0;
+      for(let d=1;d<=days;d++){const code=state.schedule[key(r,d)]||'';if(shifts[code]){h+=shifts[code].hours;if(shifts[code].hours>0)dw++;if(shifts[code].night)n++;}row+=`<td class="cell" data-row="${r}" data-day="${d}" data-shift="${code}">${code}</td>`;}
+      row+=`<td>${h}</td><td>${dw}</td><td>${n}</td></tr>`;tbody+=row;
+    });
+    tbody+='</tbody>';
+    $grid.innerHTML=thead+tbody;
+  }
+  $month.addEventListener('change',()=>{state.month=+$month.value;render();});
+  $year.addEventListener('change',()=>{state.year=+$year.value;render();});
+  document.getElementById('prev').addEventListener('click',()=>{const d=new Date(state.year,state.month-1,1);state.year=d.getFullYear();state.month=d.getMonth();$month.value=state.month;$year.value=state.year;render();});
+  document.getElementById('next').addEventListener('click',()=>{const d=new Date(state.year,state.month+1,1);state.year=d.getFullYear();state.month=d.getMonth();$month.value=state.month;$year.value=state.year;render();});
+  document.getElementById('addRow').addEventListener('click',()=>{state.employees.push({name:'Новый сотрудник'});render();});
+  $grid.addEventListener('click',e=>{const td=e.target.closest('.cell');if(td){const code=prompt('Введите код смены (D/N/O/V/B)','');if(code&&shifts[code]){state.schedule[key(+td.dataset.row,+td.dataset.day)]=code;render();}}});
+  document.getElementById('exportCsv').addEventListener('click',()=>{const days=daysInMonth(state.year,state.month);const rows=[['№','ФИО','Ознакомлен',...Array.from({length:days},(_,i)=>i+1),'Часы','Дни','Ночные']];state.employees.forEach((emp,r)=>{let h=0,dw=0,n=0;const row=[r+1,emp.name,''];for(let d=1;d<=days;d++){const c=state.schedule[key(r,d)]||'';row.push(c);if(shifts[c]){h+=shifts[c].hours;if(shifts[c].hours>0)dw++;if(shifts[c].night)n++;}}row.push(h,dw,n);rows.push(row);});const csv=rows.map(r=>r.join(',')).join('\n');const blob=new Blob([csv],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`schedule_${state.year}_${state.month+1}.csv`;a.click();});
+  render();
+})();
+</script>
+</body>
+</html>
